@@ -1,7 +1,7 @@
 """
 入口层：消息编排
 流程：情绪检测 → 意图识别 → 回复/告警
-不超过 50 行，只做组装不做实现
+关键词匹配（快路径）→ DeepSeek 语义理解（慢路径）
 """
 
 import logging
@@ -19,6 +19,7 @@ from logistics_checker import check_logistics
 from refund_handler import handle_refund
 from emotion_monitor import check_emotion
 from deepseek_client import generate_refund_reply as ds_refund_reply
+from deepseek_client import classify_intent
 
 # ---------- 配置日志 ----------
 logging.basicConfig(
@@ -39,56 +40,72 @@ def _extract_order_id(text: str) -> str | None:
     return match.group(0) if match else None
 
 
+def _handle_refund_intent(order_id: str, customer_msg: str) -> dict:
+    """处理退款意图（提取为独立函数，两处共用）"""
+    if not order_id:
+        return {
+            "action": "reply",
+            "reply": "您好，请提供您的订单号，例如「退款 ORD003」",
+            "alert": "",
+        }
+    result = handle_refund(order_id)
+    if result["decision"] == "approved":
+        amount = float(result["order"]["amount"])
+        reply = ds_refund_reply(order_id, amount, customer_msg)
+        return {"action": "reply", "reply": reply, "alert": ""}
+    elif result["decision"] == "escalated":
+        reply = build_refund_escalated_reply(order_id, result["reason"])
+        alert = f"退款转人工: {order_id} 原因: {result['reason']}"
+        return {"action": "escalated", "reply": reply, "alert": alert}
+    else:
+        reply = build_refund_order_not_found(order_id)
+        return {"action": "reply", "reply": reply, "alert": ""}
+
+
+def _handle_logistics_intent(order_id: str) -> dict:
+    """处理物流查询意图"""
+    row = check_logistics(order_id)
+    if row:
+        reply = build_logistics_reply(order_id, row)
+    else:
+        reply = build_logistics_not_found(order_id)
+    return {"action": "reply", "reply": reply, "alert": ""}
+
+
+REFUND_KEYWORDS = ("退款", "退", "不想要", "不要了", "取消")
+
+
 def process_message(customer_msg: str, order_id: str | None = None) -> dict:
     """
     处理单条客户消息，返回回复内容和告警记录。
+
+    策略：
+    1. 情绪检测（最高优先级）
+    2. 关键词快路径：退款/订货号/人工
+    3. DeepSeek 语义理解（补漏）
     """
     # ====== 第1步：情绪检测（优先级最高） ======
     emotion = check_emotion(customer_msg, order_id)
     if emotion["is_alert"]:
-        logger.warning("命中情绪关键词，转人工: %s", emotion["matched_keywords"])
         return {
             "action": "alert_human",
             "reply": "",
             "alert": emotion["alert_message"],
         }
 
-    # ====== 第2步：意图识别 ======
+    # ====== 第2步：关键词快路径 ======
     msg = customer_msg.strip()
-
-    # 场景A：客户说"退款"/"退"（"能退吗"也能触发）
-    if "退款" in msg or "退" in msg:
-        extracted = _extract_order_id(msg) or order_id
-        if not extracted:
-            return {
-                "action": "reply",
-                "reply": "您好，请提供您的订单号，例如「退款 ORD003」",
-                "alert": "",
-            }
-        result = handle_refund(extracted)
-        if result["decision"] == "approved":
-            amount = float(result["order"]["amount"])
-            reply = ds_refund_reply(extracted, amount, customer_msg)
-            return {"action": "reply", "reply": reply, "alert": ""}
-        elif result["decision"] == "escalated":
-            reply = build_refund_escalated_reply(extracted, result["reason"])
-            alert = f"退款转人工: {extracted} 原因: {result['reason']}"
-            return {"action": "escalated", "reply": reply, "alert": alert}
-        else:
-            reply = build_refund_order_not_found(extracted)
-            return {"action": "reply", "reply": reply, "alert": ""}
-
-    # 场景B：客户提供了订单号
     extracted = _extract_order_id(msg) or order_id
-    if extracted:
-        row = check_logistics(extracted)
-        if row:
-            reply = build_logistics_reply(extracted, row)
-        else:
-            reply = build_logistics_not_found(extracted)
-        return {"action": "reply", "reply": reply, "alert": ""}
 
-    # 场景C：客户说"人工"
+    # 快路径A：明确退款关键词
+    if any(kw in msg for kw in REFUND_KEYWORDS):
+        return _handle_refund_intent(extracted, customer_msg)
+
+    # 快路径B：有订单号 → 查物流
+    if extracted:
+        return _handle_logistics_intent(extracted)
+
+    # 快路径C：明确说"人工"
     if "人工" in msg:
         return {
             "action": "escalated",
@@ -96,7 +113,32 @@ def process_message(customer_msg: str, order_id: str | None = None) -> dict:
             "alert": "客户请求转人工客服",
         }
 
-    # 场景D：其他 → 欢迎引导
+    # ====== 第3步：DeepSeek 语义理解（慢路径） ======
+    intent_result = classify_intent(msg)
+    if intent_result.get("success"):
+        intent = intent_result.get("intent", "other")
+        ds_order = intent_result.get("order_id") or extracted
+
+        logger.info("DeepSeek 意图路由: %s → %s", msg[:30], intent)
+
+        if intent == "refund":
+            return _handle_refund_intent(ds_order, customer_msg)
+        elif intent == "logistics":
+            if ds_order:
+                return _handle_logistics_intent(ds_order)
+            return {
+                "action": "reply",
+                "reply": "您好，请提供您的订单号，我帮您查询物流信息。",
+                "alert": "",
+            }
+        elif intent == "human":
+            return {
+                "action": "escalated",
+                "reply": "🔄 正在为您转接人工客服，请稍候……",
+                "alert": "客户请求转人工客服（DeepSeek识别）",
+            }
+
+    # 兜底：欢迎引导
     return {
         "action": "reply",
         "reply": build_greeting(),
@@ -105,9 +147,9 @@ def process_message(customer_msg: str, order_id: str | None = None) -> dict:
 
 
 if __name__ == "__main__":
-    """交互式测试入口：在命令行里直接发消息测试"""
+    """交互式测试入口"""
     print("=" * 50)
-    print("智能客服小智 v1.0  输入消息测试，输入 q 退出")
+    print("智能客服小智 v2.0  输入消息测试，输入 q 退出")
     print("=" * 50)
     print(build_greeting())
     print("-" * 50)

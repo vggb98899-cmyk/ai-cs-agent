@@ -143,6 +143,59 @@ def generate_refund_reply(order_id: str, amount: float, customer_msg: str) -> st
         return _fallback_refund_reply(order_id, amount)
 
 
+def classify_intent(customer_msg: str) -> dict:
+    """
+    用 DeepSeek 理解客户意图。
+
+    Returns:
+        dict: {
+            "success": bool,
+            "intent": "refund" | "logistics" | "human" | "greeting" | "other",
+            "order_id": str | None,
+            "reason": str,
+        }
+    """
+    client = _get_client()
+    if not client:
+        logger.warning("DeepSeek 未配置，跳过意图识别")
+        return {"success": False, "intent": "other", "order_id": None, "reason": "API 未配置"}
+
+    prompt = (
+        "你是电商客服系统的意图识别引擎。分析客户消息，判断客户最想做什么。\n\n"
+        "意图类型：\n"
+        "- refund: 退款、退货、不想要了、取消订单\n"
+        "- logistics: 查物流、快递到哪了、什么时候到\n"
+        "- human: 转人工、找人工客服、投诉\n"
+        "- greeting: 打招呼、问在不在、闲聊\n"
+        "- other: 以上都不属于\n\n"
+        "请严格按照 JSON 格式返回，不要包含其他文字：\n"
+        '{"intent": "refund", "order_id": "ORD003", "reason": "客户明确说不要了"}'
+    )
+
+    try:
+        resp = client.chat.completions.create(
+            model=DEEPSEEK_MODEL,
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": customer_msg},
+            ],
+            temperature=0.1,
+            max_tokens=200,
+        )
+        text = resp.choices[0].message.content.strip()
+        text = text.replace("```json", "").replace("```", "").strip()
+
+        import json
+        result = json.loads(text)
+        result["success"] = True
+        logger.info("DeepSeek 意图识别: %s → %s", customer_msg[:30], result.get("intent"))
+        return result
+
+    except Exception as e:
+        logger.error("DeepSeek 意图识别异常: %s", str(e))
+        return {"success": False, "intent": "other", "order_id": None, "reason": str(e)[:50]}
+
+
 def _fallback_refund_reply(order_id: str, amount: float) -> str:
     """API 失败时的模板兜底"""
     return (
