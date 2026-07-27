@@ -56,9 +56,8 @@ def process_message(customer_msg: str, order_id: str | None = None) -> dict:
     # ====== 第2步：意图识别 ======
     msg = customer_msg.strip()
 
-    # 场景A：客户说"退款"
-    if "退款" in msg:
-        # 从消息里提取订单号
+    # 场景A：客户说"退款"/"退"（"能退吗"也能触发）
+    if "退款" in msg or "退" in msg:
         extracted = _extract_order_id(msg) or order_id
         if not extracted:
             return {
