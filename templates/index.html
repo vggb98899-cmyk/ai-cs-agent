@@ -201,18 +201,50 @@
         }
         .alert-banner {
             align-self: stretch;
-            background: #fff1f0;
-            border: 1px solid #ffa39e;
-            border-radius: 8px;
-            padding: 10px 14px;
-            font-size: 13px;
-            color: #cf1322;
-            animation: shake 0.3s ease;
-        }
-        .alert-banner .label {
-            font-weight: 700;
+            background: linear-gradient(135deg, #fff1f0 0%, #ffccc7 100%);
+            border: 2px solid #ff4d4f;
+            border-radius: 10px;
+            padding: 14px 16px;
             font-size: 14px;
-            margin-bottom: 4px;
+            color: #a8071a;
+            box-shadow: 0 2px 12px rgba(255, 77, 79, 0.25);
+            animation: alertPulse 0.6s ease-in-out 3;
+        }
+        .alert-banner .alert-header {
+            font-weight: 700;
+            font-size: 16px;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .alert-banner .alert-keywords {
+            background: #ff4d4f;
+            color: #fff;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 13px;
+            display: inline-block;
+            margin: 4px 0;
+            font-weight: 600;
+        }
+        .alert-banner .alert-detail {
+            font-size: 13px;
+            color: #820014;
+            margin-top: 4px;
+            line-height: 1.5;
+        }
+        .blink-icon {
+            display: inline-block;
+            animation: blink 0.6s ease-in-out 3;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(1.2); }
+        }
+        @keyframes alertPulse {
+            0%, 100% { box-shadow: 0 2px 12px rgba(255, 77, 79, 0.25); }
+            50% { box-shadow: 0 2px 24px rgba(255, 77, 79, 0.5); }
         }
 
         /* 输入区 */
@@ -334,7 +366,37 @@
     function addAlert(text) {
         const div = document.createElement("div");
         div.className = "alert-banner";
-        div.innerHTML = `<div class="label">🚨 情绪告警</div><div>${text}</div>`;
+
+        // 解析告警文本：提取敏感词和订单号
+        const lines = text.split("\n").map(l => l.trim()).filter(l => l);
+        let header = "高风险情绪告警";
+        let keywords = "";
+        let order = "";
+        let quote = "";
+
+        for (const line of lines) {
+            if (line.startsWith("命中敏感词：[")) {
+                keywords = line.replace("命中敏感词：[", "").replace("]", "");
+            } else if (line.startsWith("订单号：")) {
+                order = line.replace("订单号：", "");
+            } else if (line.startsWith("客户原话：")) {
+                quote = line.replace("客户原话：", "");
+            } else if (line.includes("请立即介入")) {
+                header = line;
+            }
+        }
+
+        // 构建新样式横幅
+        let html = `<div class="alert-header"><span class="blink-icon">🚨</span> ${header}</div>`;
+        if (keywords) {
+            // 每个敏感词独立标签
+            const tags = keywords.split("、").map(k => `<span class="alert-keywords">${k}</span>`).join(" ");
+            html += `<div>${tags}</div>`;
+        }
+        if (order) html += `<div class="alert-detail">📌 订单：${order}</div>`;
+        if (quote) html += `<div class="alert-detail">💬 ${quote}</div>`;
+
+        div.innerHTML = html;
         chatArea.appendChild(div);
         chatArea.scrollTop = chatArea.scrollHeight;
     }

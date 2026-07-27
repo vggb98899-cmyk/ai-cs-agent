@@ -87,12 +87,19 @@ def build_alert_message(
     matched_keywords: list[str],
     order_id: str | None,
 ) -> str:
-    """组装飞书告警消息（模拟）"""
+    """
+    组装告警消息（V2-03：敏感词摘录前置，李敏不用翻聊天记录）
+    格式：
+      🚨 高风险情绪告警！请立即介入
+      命中敏感词：[投诉、工商、垃圾]
+      订单号：ORD001
+      客户原话：ORD001 就是个垃圾货！
+    """
     keyword_str = "、".join(matched_keywords)
     order_str = order_id if order_id else "未知"
     return (
-        f"🚨 情绪关键词告警\n"
-        f"触发词：{keyword_str}\n"
-        f"关联订单：{order_str}\n"
-        f"客户消息：{customer_msg[:200]}"
+        f"🚨 高风险情绪告警！请立即介入\n"
+        f"命中敏感词：[{keyword_str}]\n"
+        f"订单号：{order_str}\n"
+        f"客户原话：{customer_msg[:120]}"
     )
