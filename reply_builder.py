@@ -66,6 +66,22 @@ def build_greeting() -> str:
     )
 
 
+def build_cancel_success_reply(order_id: str) -> str:
+    """取消订单成功通知（未发货）"""
+    return (
+        f"✅ 订单 {order_id} 已成功取消，商品尚未发货，无需其他操作。\n"
+        f"退款金额将在 1-3 个工作日内原路返回。"
+    )
+
+
+def build_cancel_redirect_reply(order_id: str, reason: str) -> str:
+    """已发货→转退款通知"""
+    return (
+        f"🔄 订单 {order_id} 已发货，无法直接取消。\n"
+        f"{reason}，请耐心等待人工处理。"
+    )
+
+
 def build_alert_message(
     customer_msg: str,
     matched_keywords: list[str],

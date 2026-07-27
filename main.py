@@ -14,9 +14,12 @@ from reply_builder import (
     build_refund_approved_reply,
     build_refund_escalated_reply,
     build_refund_order_not_found,
+    build_cancel_success_reply,
+    build_cancel_redirect_reply,
 )
 from logistics_checker import check_logistics
 from refund_handler import handle_refund
+from cancel_handler import handle_cancel
 from emotion_monitor import check_emotion
 from deepseek_client import generate_refund_reply as ds_refund_reply
 from deepseek_client import classify_intent
@@ -93,7 +96,9 @@ def _handle_logistics_intent(order_id: str, mild_alert: str = "") -> dict:
     return {"action": "reply", "reply": reply, "alert": mild_alert}
 
 
-REFUND_KEYWORDS = ("退款", "退", "不想要", "不太想要", "不要了", "取消")
+# 取消 vs 退款分拆（李敏红线：未发货→取消，已发货→退款）
+CANCEL_KEYWORDS = ("取消", "不想要", "不太想要", "不要了")
+REFUND_KEYWORDS = ("退款", "退")
 HUMAN_KEYWORDS = ("人工", "免单", "赔偿", "优惠券")
 
 
@@ -124,15 +129,34 @@ def process_message(customer_msg: str, order_id: str | None = None) -> dict:
     msg = customer_msg.strip()
     extracted = _extract_order_id(msg) or order_id
 
-    # 快路径A：明确退款关键词
+    # 快路径A：取消订单（未发货→取消，已发货→转退款流程）
+    if any(kw in msg for kw in CANCEL_KEYWORDS):
+        if not extracted:
+            return {
+                "action": "reply",
+                "reply": "您好，请提供您的订单号，例如「取消 ORD012」",
+                "alert": mild_alert,
+            }
+        cancel_result = handle_cancel(extracted)
+        if cancel_result["decision"] == "cancelled":
+            reply = build_cancel_success_reply(extracted)
+            return {"action": "reply", "reply": reply, "alert": mild_alert}
+        elif cancel_result["decision"] == "redirect_to_refund":
+            # 已发货→转入退款流程
+            return _handle_refund_intent(extracted, customer_msg, mild_alert)
+        else:
+            reply = build_refund_order_not_found(extracted)
+            return {"action": "reply", "reply": reply, "alert": mild_alert}
+
+    # 快路径B：退款（已发货诉求，走200元规则）
     if any(kw in msg for kw in REFUND_KEYWORDS):
         return _handle_refund_intent(extracted, customer_msg, mild_alert)
 
-    # 快路径B：有订单号 → 查物流
+    # 快路径C：有订单号 → 查物流
     if extracted:
         return _handle_logistics_intent(extracted, mild_alert)
 
-    # 快路径C：转人工（含免单/赔偿等需人工处理的需求）
+    # 快路径D：转人工（含免单/赔偿等需人工处理的需求）
     if any(kw in msg for kw in HUMAN_KEYWORDS):
         return {
             "action": "escalated",
@@ -157,7 +181,22 @@ def process_message(customer_msg: str, order_id: str | None = None) -> dict:
 
         logger.info("DeepSeek 意图路由: %s → %s", msg[:30], intent)
 
-        if intent == "refund":
+        if intent == "cancel":
+            # DeepSeek 识别为取消 → 走取消流程
+            if not ds_order:
+                return {
+                    "action": "reply",
+                    "reply": "您好，请提供您的订单号，例如「取消 ORD012」",
+                    "alert": mild_alert,
+                }
+            cancel_result = handle_cancel(ds_order)
+            if cancel_result["decision"] == "cancelled":
+                return {"action": "reply", "reply": build_cancel_success_reply(ds_order), "alert": mild_alert}
+            elif cancel_result["decision"] == "redirect_to_refund":
+                return _handle_refund_intent(ds_order, customer_msg, mild_alert)
+            else:
+                return {"action": "reply", "reply": build_refund_order_not_found(ds_order), "alert": mild_alert}
+        elif intent == "refund":
             return _handle_refund_intent(ds_order, customer_msg, mild_alert)
         elif intent == "logistics":
             if ds_order:
