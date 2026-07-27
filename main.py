@@ -73,6 +73,7 @@ def _handle_logistics_intent(order_id: str) -> dict:
 
 
 REFUND_KEYWORDS = ("退款", "退", "不想要", "不要了", "取消")
+HUMAN_KEYWORDS = ("人工", "免单", "赔偿", "优惠券")
 
 
 def process_message(customer_msg: str, order_id: str | None = None) -> dict:
@@ -105,8 +106,8 @@ def process_message(customer_msg: str, order_id: str | None = None) -> dict:
     if extracted:
         return _handle_logistics_intent(extracted)
 
-    # 快路径C：明确说"人工"
-    if "人工" in msg:
+    # 快路径C：转人工（含免单/赔偿等需人工处理的需求）
+    if any(kw in msg for kw in HUMAN_KEYWORDS):
         return {
             "action": "escalated",
             "reply": "🔄 正在为您转接人工客服，请稍候……",
