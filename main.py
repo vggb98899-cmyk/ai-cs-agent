@@ -18,6 +18,7 @@ from reply_builder import (
 from logistics_checker import check_logistics
 from refund_handler import handle_refund
 from emotion_monitor import check_emotion
+from deepseek_client import generate_refund_reply as ds_refund_reply
 
 # ---------- 配置日志 ----------
 logging.basicConfig(
@@ -67,7 +68,8 @@ def process_message(customer_msg: str, order_id: str | None = None) -> dict:
             }
         result = handle_refund(extracted)
         if result["decision"] == "approved":
-            reply = build_refund_approved_reply(extracted, float(result["order"]["amount"]))
+            amount = float(result["order"]["amount"])
+            reply = ds_refund_reply(extracted, amount, customer_msg)
             return {"action": "reply", "reply": reply, "alert": ""}
         elif result["decision"] == "escalated":
             reply = build_refund_escalated_reply(extracted, result["reason"])
