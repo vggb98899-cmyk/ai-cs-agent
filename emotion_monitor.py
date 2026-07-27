@@ -30,7 +30,8 @@ def check_emotion(customer_msg: str, order_id: str | None = None) -> dict:
 
     Returns:
         dict: {
-            "is_alert": bool,
+            "is_alert": bool,              # 是否触发告警
+            "severity": "severe"|"mild"|"none",  # severe=拦截业务, mild=不拦截但标记
             "matched_keywords": list[str],
             "alert_message": str,
             "order_id": str | None,
@@ -46,6 +47,7 @@ def check_emotion(customer_msg: str, order_id: str | None = None) -> dict:
         logger.warning("关键词告警: %s 订单=%s", matched, detected_order)
         return {
             "is_alert": True,
+            "severity": "severe",
             "matched_keywords": matched,
             "alert_message": alert_msg,
             "order_id": detected_order,
@@ -54,22 +56,26 @@ def check_emotion(customer_msg: str, order_id: str | None = None) -> dict:
     # ====== 第2层：DeepSeek 语义分析（补漏） ======
     sentiment = analyze_sentiment(customer_msg)
     if sentiment.get("success") and sentiment.get("is_negative"):
-        # DeepSeek 认为有负面情绪，也告警
         alert_msg = build_alert_message(
             customer_msg,
             [f"[DeepSeek]{sentiment.get('sentiment', '负面情绪')}"],
             detected_order,
         )
-        logger.warning("DeepSeek 语义告警: %s", sentiment.get("reason"))
+        sent_type = sentiment.get("sentiment", "")
+        severity = "severe" if sent_type in ("愤怒", "威胁") else "mild"
+
+        logger.warning("DeepSeek 语义告警(%s): %s", severity, sentiment.get("reason"))
         return {
             "is_alert": True,
-            "matched_keywords": [f"DeepSeek:{sentiment.get('sentiment', '')}"],
+            "severity": severity,
+            "matched_keywords": [f"DeepSeek:{sent_type}"],
             "alert_message": alert_msg,
             "order_id": detected_order,
         }
 
     return {
         "is_alert": False,
+        "severity": "none",
         "matched_keywords": [],
         "alert_message": "",
         "order_id": detected_order,
