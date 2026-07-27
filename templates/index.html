@@ -126,6 +126,20 @@
         .wb-item .wb-detail .label {
             color: #999;
         }
+        .takeover-btn {
+            font-size: 11px;
+            padding: 2px 10px;
+            border: 1px solid #1a73e8;
+            background: #fff;
+            color: #1a73e8;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .takeover-btn:hover {
+            background: #1a73e8;
+            color: #fff;
+        }
         .wb-empty {
             text-align: center;
             color: #ccc;
@@ -325,6 +339,8 @@
         chatArea.scrollTop = chatArea.scrollHeight;
     }
 
+    let agentMode = false;
+
     function addLogEntry(msg, action, data) {
         const time = now();
         const iconMap = { reply: "🤖", escalated: "🔄", alert_human: "🚨" };
@@ -350,10 +366,18 @@
 
         const item = document.createElement("div");
         item.className = "wb-item";
+
+        // 转人工/告警的消息显示"接管"按钮
+        const needAgent = (action === "escalated" || action === "alert_human");
+        const agentBtn = needAgent
+            ? `<button class="takeover-btn" onclick="takeover('${msg.replace(/'/g, "\\'")}')">💬 接管</button>`
+            : "";
+
         item.innerHTML =
             `<div class="wb-header">
                 <span class="wb-time">${time}</span>
                 <span class="wb-tag ${tagClassMap[action] || 'tag-reply'}">${iconMap[action] || '❓'} ${labelMap[action] || action}</span>
+                ${agentBtn}
             </div>
             <div class="wb-msg">${msg.slice(0, 60)}${msg.length > 60 ? "…" : ""}</div>
             <div class="wb-detail"><span class="label">处理结果：</span>${detail}</div>`;
@@ -361,6 +385,59 @@
         wbList.prepend(item);
         logEntries.push({ time, msg, action });
         logCount.textContent = logEntries.length + " 条";
+    }
+
+    function takeover(customerMsg) {
+        if (agentMode) return;
+        agentMode = true;
+
+        // 在输入区显示人工回复模式
+        const inputArea = document.querySelector(".input-area");
+        const hint = inputArea.querySelector(".hint");
+
+        // 切换输入框提示
+        msgInput.placeholder = "输入您的人工回复…（按 Enter 发送）";
+        sendBtn.textContent = "回复客户";
+        hint.textContent = "🟢 人工接管模式";
+
+        // 替换 send 行为
+        sendBtn.onclick = sendAgentReply;
+        msgInput.onkeydown = function(e) {
+            if (e.key === "Enter") sendAgentReply();
+        };
+
+        // 在对话区显示接管提示
+        addBubble("👩‍💼 客服李敏已接入对话", "bot");
+
+        msgInput.focus();
+    }
+
+    async function sendAgentReply() {
+        const msg = msgInput.value.trim();
+        if (!msg) return;
+
+        msgInput.value = "";
+        sendBtn.disabled = true;
+        msgInput.disabled = true;
+
+        try {
+            const res = await fetch("/agent_reply", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message: msg }),
+            });
+            const data = await res.json();
+            addBubble(data.reply, "bot");
+
+            // 也加一条工作台记录
+            addLogEntry("【人工回复】" + msg.slice(0, 40), "reply", data);
+        } catch (err) {
+            addBubble("⚠️ 发送失败", "bot");
+        }
+
+        sendBtn.disabled = false;
+        msgInput.disabled = false;
+        msgInput.focus();
     }
 
     async function send() {
