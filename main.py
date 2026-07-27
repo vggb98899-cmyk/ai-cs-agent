@@ -40,6 +40,20 @@ def _extract_order_id(text: str) -> str | None:
     return match.group(0) if match else None
 
 
+def _is_garbage_input(text: str) -> bool:
+    """检测无意义的乱码/垃圾输入，避免浪费 DeepSeek API"""
+    import re
+    # 提取中文字符
+    chinese = re.findall(r'[\u4e00-\u9fff]', text)
+    # 全是标点/符号/字母且少于10个字符 → 乱码
+    if len(chinese) == 0 and len(text.strip()) < 15:
+        return True
+    # 全是重复标点
+    if all(c in '。，！？.?!,~-、…' for c in text.strip()):
+        return True
+    return False
+
+
 def _handle_refund_intent(order_id: str, customer_msg: str, mild_alert: str = "") -> dict:
     """处理退款意图（提取为独立函数，两处共用）"""
     if not order_id:
@@ -124,6 +138,15 @@ def process_message(customer_msg: str, order_id: str | None = None) -> dict:
             "action": "escalated",
             "reply": "🔄 正在为您转接人工客服，请稍候……",
             "alert": "客户请求转人工客服" + (f" | {mild_alert}" if mild_alert else ""),
+        }
+
+    # ====== 第2.5步：垃圾输入检测（省钱，不调DeepSeek） ======
+    if _is_garbage_input(msg):
+        logger.info("垃圾输入拦截: %s", msg[:30])
+        return {
+            "action": "reply",
+            "reply": "您好，请描述您的问题，例如输入订单号查询物流或申请退款。",
+            "alert": mild_alert,
         }
 
     # ====== 第3步：DeepSeek 语义理解（慢路径） ======
