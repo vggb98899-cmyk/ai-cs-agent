@@ -51,7 +51,12 @@ def _handle_refund_intent(order_id: str, customer_msg: str, mild_alert: str = ""
     result = handle_refund(order_id)
     if result["decision"] == "approved":
         amount = float(result["order"]["amount"])
-        reply = ds_refund_reply(order_id, amount, customer_msg)
+        order_status = result["order"]["status"]
+        # 查物流状态，让 DeepSeek 基于事实说话
+        log_row = check_logistics(order_id)
+        log_status = log_row["status"] if log_row else ""
+        reply = ds_refund_reply(order_id, amount, customer_msg,
+                                order_status, log_status)
         return {"action": "reply", "reply": reply, "alert": mild_alert}
     elif result["decision"] == "escalated":
         reply = build_refund_escalated_reply(order_id, result["reason"])
@@ -74,7 +79,7 @@ def _handle_logistics_intent(order_id: str, mild_alert: str = "") -> dict:
     return {"action": "reply", "reply": reply, "alert": mild_alert}
 
 
-REFUND_KEYWORDS = ("退款", "退", "不想要", "不要了", "取消")
+REFUND_KEYWORDS = ("退款", "退", "不想要", "不太想要", "不要了", "取消")
 HUMAN_KEYWORDS = ("人工", "免单", "赔偿", "优惠券")
 
 

@@ -91,14 +91,17 @@ def analyze_sentiment(customer_msg: str) -> dict:
         }
 
 
-def generate_refund_reply(order_id: str, amount: float, customer_msg: str) -> str:
+def generate_refund_reply(order_id: str, amount: float, customer_msg: str,
+                           order_status: str = "", logistics_status: str = "") -> str:
     """
     用 DeepSeek 生成退款通过的拟人化回复。
 
     Args:
         order_id: 订单号
         amount: 退款金额
-        customer_msg: 客户原始消息（用于参考语气）
+        customer_msg: 客户原始消息
+        order_status: 订单状态（如"已发货未签收"）
+        logistics_status: 物流状态（如"派送中"）
 
     Returns:
         生成的回复文本，API 失败时返回模板文本
@@ -110,12 +113,18 @@ def generate_refund_reply(order_id: str, amount: float, customer_msg: str) -> st
 
     prompt = (
         "你是电商客服小智，性格亲切温和。客户申请退款已自动审核通过。\n"
-        "请根据以下信息，生成一段简短、温暖的退款确认回复（不超过 100 字）：\n"
-        "- 礼貌但不过度热情，像真人客服在说话\n"
+        "请根据以下**真实订单数据**生成回复。\n"
+        "⚠️ 重要规则：只能基于下方提供的真实数据说话，禁止编造物流状态或发货情况。\n"
+        "如果客户说的和真实数据不一致，委婉纠正而非附和。\n"
+        "生成一段简短、温暖的退款确认回复（不超过 100 字）：\n"
+        "- 礼貌但不过度热情\n"
         "- 告知退款已通过、金额、到账时间\n"
-        "- 结合客户原始消息的语气适当安抚\n"
-        "- 不要使用过多表情符号，1-2个即可\n"
+        "- 基于真实状态回复（如已发货则告知会拦截退回）\n"
     )
+
+    status_info = f"订单状态：{order_status}" if order_status else ""
+    logistics_info = f"物流状态：{logistics_status}" if logistics_status else ""
+    facts = f"{status_info}\n{logistics_info}".strip()
 
     try:
         resp = client.chat.completions.create(
@@ -128,6 +137,7 @@ def generate_refund_reply(order_id: str, amount: float, customer_msg: str) -> st
                         f"客户消息：{customer_msg}\n"
                         f"订单号：{order_id}\n"
                         f"退款金额：¥{amount:.2f}\n"
+                        f"{facts}\n"
                     ),
                 },
             ],
