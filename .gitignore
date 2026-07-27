@@ -4,3 +4,5 @@ __pycache__/
 .venv/
 venv/
 *.log
+面试文档.md
+项目文档.md
