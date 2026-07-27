@@ -17,7 +17,7 @@ from reply_builder import (
     build_cancel_success_reply,
     build_cancel_redirect_reply,
 )
-from logistics_checker import check_logistics
+from logistics_checker import check_logistics, check_logistics_online
 from refund_handler import handle_refund
 from cancel_handler import handle_cancel
 from emotion_monitor import check_emotion
@@ -86,10 +86,27 @@ def _handle_refund_intent(order_id: str, customer_msg: str, mild_alert: str = ""
         return {"action": "reply", "reply": reply, "alert": mild_alert}
 
 
+def _normalize_logistics_row(order_id: str, row: dict) -> dict:
+    """统一 CSV 和 Playwright 两种返回格式"""
+    if row.get("source") == "playwright":
+        # Playwright 格式 → 补充 CSV 字段
+        csv_row = check_logistics(order_id)
+        if csv_row:
+            row["last_location"] = csv_row.get("last_location", "未知")
+            row["last_time"] = csv_row.get("last_time", "")
+            row["carrier"] = csv_row.get("carrier", row.get("carrier", ""))
+            row["tracking_number"] = csv_row.get("tracking_number", row.get("tracking_number", ""))
+        else:
+            row["last_location"] = "物流查询"
+            row["last_time"] = ""
+    return row
+
+
 def _handle_logistics_intent(order_id: str, mild_alert: str = "") -> dict:
-    """处理物流查询意图"""
-    row = check_logistics(order_id)
+    """处理物流查询意图（优先 Playwright，降级 CSV）"""
+    row = check_logistics_online(order_id)
     if row:
+        row = _normalize_logistics_row(order_id, row)
         reply = build_logistics_reply(order_id, row)
     else:
         reply = build_logistics_not_found(order_id)
