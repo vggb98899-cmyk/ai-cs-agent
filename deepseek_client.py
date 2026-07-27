@@ -153,6 +153,119 @@ def generate_refund_reply(order_id: str, amount: float, customer_msg: str,
         return _fallback_refund_reply(order_id, amount)
 
 
+def generate_escalated_reply(
+    order_id: str,
+    reason: str,
+    customer_msg: str,
+    amount: float | None = None,
+) -> str:
+    """
+    用 DeepSeek 生成转人工话术（V2-02：带情绪安抚的个性化引导）。
+
+    Args:
+        order_id: 订单号
+        reason: 转人工原因（如"金额¥250超过限额¥200"）
+        customer_msg: 客户原话
+        amount: 退款金额（可选）
+
+    Returns:
+        生成的回复文本，API 失败时返回模板文本
+    """
+    client = _get_client()
+    if not client:
+        logger.warning("DeepSeek 未配置，使用模板回复")
+        return _fallback_escalated_reply(order_id, reason)
+
+    prompt = (
+        "你是电商客服小智，性格亲切温和。客户的退款申请未能自动处理，需要转接人工客服。\n"
+        "请根据以下信息生成一段回复（不超过 100 字）：\n"
+        "- 语气亲切，像真人客服在说话\n"
+        "- 简要说明为什么不能自动处理（引用原因）\n"
+        "- 告知已转人工，请客户耐心等待\n"
+        "- 不要过度使用表情符号，1个即可\n"
+    )
+
+    try:
+        resp = client.chat.completions.create(
+            model=DEEPSEEK_MODEL,
+            messages=[
+                {"role": "system", "content": prompt},
+                {
+                    "role": "user",
+                    "content": (
+                        f"客户消息：{customer_msg}\n"
+                        f"订单号：{order_id}\n"
+                        f"退款金额：¥{amount:.2f}\n转人工原因：{reason}\n"
+                        if amount else
+                        f"客户消息：{customer_msg}\n"
+                        f"订单号：{order_id}\n"
+                        f"转人工原因：{reason}\n"
+                    ),
+                },
+            ],
+            temperature=0.7,
+            max_tokens=300,
+        )
+        reply = resp.choices[0].message.content.strip()
+        logger.info("DeepSeek 生成转人工话术成功: %s", reply[:50])
+        return reply
+
+    except Exception as e:
+        logger.error("DeepSeek 生成转人工话术异常: %s", str(e))
+        return _fallback_escalated_reply(order_id, reason)
+
+
+def _fallback_escalated_reply(order_id: str, reason: str) -> str:
+    """转人工话术模板兜底"""
+    return (
+        f"🔄 您好，订单 {order_id} 的退款申请因「{reason}」"
+        f"已转交人工客服处理，请耐心等待。\n"
+        f"我们会尽快为您处理！"
+    )
+
+
+def generate_human_transfer_reply(customer_msg: str) -> str:
+    """
+    用 DeepSeek 生成通用转人工话术（非退款场景）。
+    用于"人工""免单""赔偿"等请求。
+    """
+    client = _get_client()
+    if not client:
+        logger.warning("DeepSeek 未配置，使用模板回复")
+        return _fallback_human_reply()
+
+    prompt = (
+        "你是电商客服小智，性格亲切温和。客户提出了需要人工处理的需求。\n"
+        "请生成一段回复（不超过 80 字）：\n"
+        "- 确认收到客户需求\n"
+        "- 告知已转接人工客服\n"
+        "- 语气亲切自然\n"
+        "- 使用1个表情符号\n"
+    )
+
+    try:
+        resp = client.chat.completions.create(
+            model=DEEPSEEK_MODEL,
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": f"客户消息：{customer_msg}"},
+            ],
+            temperature=0.7,
+            max_tokens=200,
+        )
+        reply = resp.choices[0].message.content.strip()
+        logger.info("DeepSeek 生成转人工话术成功: %s", reply[:50])
+        return reply
+    except Exception as e:
+        logger.error("DeepSeek 生成转人工话术异常: %s", str(e))
+        return _fallback_human_reply()
+
+
+def _fallback_human_reply() -> str:
+    """通用转人工模板兜底"""
+    return "🔄 正在为您转接人工客服，请稍候……"
+
+
 def classify_intent(customer_msg: str) -> dict:
     """
     用 DeepSeek 理解客户意图。

@@ -22,6 +22,8 @@ from refund_handler import handle_refund
 from cancel_handler import handle_cancel
 from emotion_monitor import check_emotion
 from deepseek_client import generate_refund_reply as ds_refund_reply
+from deepseek_client import generate_escalated_reply as ds_escalated_reply
+from deepseek_client import generate_human_transfer_reply as ds_human_reply
 from deepseek_client import classify_intent
 
 # ---------- 配置日志 ----------
@@ -76,7 +78,8 @@ def _handle_refund_intent(order_id: str, customer_msg: str, mild_alert: str = ""
                                 order_status, log_status)
         return {"action": "reply", "reply": reply, "alert": mild_alert}
     elif result["decision"] == "escalated":
-        reply = build_refund_escalated_reply(order_id, result["reason"])
+        amount = float(result["order"]["amount"])
+        reply = ds_escalated_reply(order_id, result["reason"], customer_msg, amount)
         alert = f"退款转人工: {order_id} 原因: {result['reason']}"
         if mild_alert:
             alert += f" | {mild_alert}"
@@ -177,7 +180,7 @@ def process_message(customer_msg: str, order_id: str | None = None) -> dict:
     if any(kw in msg for kw in HUMAN_KEYWORDS):
         return {
             "action": "escalated",
-            "reply": "🔄 正在为您转接人工客服，请稍候……",
+            "reply": ds_human_reply(msg),
             "alert": "客户请求转人工客服" + (f" | {mild_alert}" if mild_alert else ""),
         }
 
@@ -226,7 +229,7 @@ def process_message(customer_msg: str, order_id: str | None = None) -> dict:
         elif intent == "human":
             return {
                 "action": "escalated",
-                "reply": "🔄 正在为您转接人工客服，请稍候……",
+                "reply": ds_human_reply(msg),
                 "alert": "客户请求转人工客服（DeepSeek识别）" + (f" | {mild_alert}" if mild_alert else ""),
             }
 
